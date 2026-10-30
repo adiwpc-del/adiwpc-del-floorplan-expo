@@ -15,6 +15,7 @@ const BAD_KEY = 'AIzaTesKunciGeminiSalah0002';
 const AUTH_KEY = 'AQ.Ab8RN6TesKunciAuthBaru-Google.0003'; // new AI Studio "auth key" format (dots)
 const OPEN_KEY = 'AIzaTesKunciTanpaBatasan0004'; // a standard key without restrictions: Google answers 403
 const VOICE = Buffer.from('OggS-rekaman-suara-tiruan');
+const TECH_WORDS = /kuota|token|kredit|gemini|\bai\b|chat ?bot|\bbot\b|virtual|fonnte|server/i; // never told to the person chatting on WhatsApp
 let s;
 let wa;
 let gm;
@@ -208,14 +209,16 @@ test('Keuangan tidak bisa booking lewat Gemini: alasannya kembali ke Gemini, YA 
   assert.equal((await booth('A-03')).status, 'available');
 });
 
-test('Gemini gagal (kuota habis, juga di model cadangan): staf mendapat alasannya dan diarahkan ke MENU', async () => {
+test('Gemini gagal (kuota habis, juga di model cadangan): di WhatsApp hanya kalimat netral; alasan teknisnya tercatat untuk admin', async () => {
   const n = geminiCalls.length;
   const quota = { status: 429, body: { error: { code: 429, status: 'RESOURCE_EXHAUSTED', message: 'Quota exceeded' } } };
   replies.push(quota, quota);
   const r = await say(SALES, 'halo');
-  assert.match(r, /kuota/i);
-  assert.match(r, /MENU/);
   assert.match(r, /Mohon maaf, Kak/, 'tetap santun saat gagal');
+  assert.match(r, /MENU/);
+  assert.doesNotMatch(r, TECH_WORDS, 'tanpa kuota / token / AI / nama layanan');
+  const last = (await s.api('GET', '/maintenance/whatsapp', undefined, { as: 'superadmin' })).body.status.lastIncoming;
+  assert.match(last.outcome, /kuota/i, 'alasannya terlihat di Setting'); 
   assert.deepEqual(geminiCalls.slice(n).map(c => c.model), ['gemini-3-flash-preview', 'gemini-3.1-flash-lite'], 'model cadangan ikut dicoba');
 });
 
@@ -323,11 +326,16 @@ test('persona asisten: Kak Aisyah secara bawaan (prompt Gemini, MENU); bisa diga
   assert.match(prompt, /Aisyah \(panggilan: Kak Aisyah\)/);
   assert.match(prompt, /"Kak"/);
   assert.match(prompt, /politik, SARA/);
+  assert.match(prompt, /Jangan menyebut diri bot/, 'tidak mengumumkan dirinya mesin');
+  assert.match(prompt, /jangan mengaku manusia/i, 'tetapi jujur bila ditanya sungguh-sungguh');
+  assert.doesNotMatch(prompt, /virtual/i);
   assert.match(prompt, /siapkan_booking/, 'aturan kerja tetap ada');
   // data rules come first and forbid invented booths / numbers (a greeting once made the model list booths that do not exist)
   assert.match(prompt, /WAJIB memanggil alat/);
   assert.ok(prompt.indexOf('WAJIB memanggil alat') < prompt.indexOf('Kepribadian'), 'aturan data sebelum persona');
-  assert.match(await say(SALES, 'MENU'), /Saya Aisyah/);
+  const menu = await say(SALES, 'MENU');
+  assert.match(menu, /Saya Aisyah/);
+  assert.doesNotMatch(menu, /virtual|\bbot\b|chat ?bot|\bai\b/i, 'tidak menyebut dirinya mesin (judul project tes berisi "GEMINI", itu data)');
 
   assert.equal((await s.api('PUT', '/maintenance/whatsapp', { persona: 'tidak-ada' }, { as: 'superadmin' })).status, 400);
   const z = await s.api('PUT', '/maintenance/whatsapp', { persona: 'zahra' }, { as: 'superadmin' });
@@ -382,10 +390,15 @@ test('pesan suara: didengarkan Gemini, ditulis ulang, lalu dijawab seperti pesan
   assert.equal(last.from, '…2222', 'nomor disamarkan');
 
   // Fonnte did not forward the file (package without attachments)
-  assert.match(await say(FINANCE, '', 1, { extension: 'ogg', filename: 'voice.ogg' }), /paket Fonnte[\s\S]*ketik/);
+  const noFile = await say(FINANCE, '', 1, { extension: 'ogg', filename: 'voice.ogg' });
+  assert.match(noFile, /ketik/);
+  assert.doesNotMatch(noFile, TECH_WORDS);
+  assert.match((await s.api('GET', '/maintenance/whatsapp', undefined, { as: 'superadmin' })).body.status.lastIncoming.outcome, /Fonnte tidak mengirim/, 'alasannya untuk admin');
   // the voice note arrives as an invisible character (Fonnte package without attachments): never sent to Gemini
   const before = geminiCalls.length;
-  assert.match(await say(FINANCE, '\u200e'), /tidak berisi teks/);
+  const empty = await say(FINANCE, '\u200e');
+  assert.match(empty, /tidak berisi teks/);
+  assert.doesNotMatch(empty, TECH_WORDS);
   assert.equal(geminiCalls.length, before);
   // nothing intelligible
   replies.push(modelSays('(tidak terdengar)'));

@@ -1,6 +1,6 @@
 import express from 'express';
 import { waEnabled, secretMatches, incomingMessage, staffByPhone, sendText, sendFile, saveWaMeta } from '../utils/whatsapp.js';
-import { answerStaff, answerVoice, currentPersona } from '../utils/waAgent.js';
+import { answerStaff, answerVoice, currentPersona, takeFailure } from '../utils/waAgent.js';
 
 // WhatsApp (Fonnte) webhook of the staff assistant (AGENTS.md §45). Public path; Fonnte does not sign its calls, so the
 // URL itself carries a secret: /api/whatsapp/webhook/<FONNTE_WEBHOOK_SECRET>.
@@ -34,12 +34,14 @@ export async function processMessage(m) {
   let outcome = 'dijawab';
   let reply;
   if (m.type === 'audio') ({ reply, outcome } = await answerVoice(user, m));
-  else if (m.type === 'media') { outcome = 'lampiran bukan suara: diminta mengetik'; reply = 'Mohon maaf, Kak 🙏 gambar dan file belum bisa dibaca. Silakan ketik pertanyaannya, atau kirim pesan suara.'; }
+  else if (m.type === 'media') { outcome = 'lampiran bukan suara: diminta mengetik'; reply = `Mohon maaf, Kak 🙏 gambar dan file belum bisa ${currentPersona().name} buka. Silakan ketik pertanyaannya ya, Kak.`; }
   else if (m.type === 'empty') {
     outcome = 'tanpa teks (pesan suara / lampiran yang tidak diteruskan Fonnte?): diminta mengetik';
-    reply = `Mohon maaf, Kak 🙏 pesan ini tidak berisi teks yang bisa ${currentPersona().name} baca. Pesan suara, gambar, dan file baru bisa diterima bila paket Fonnte nomor ini meneruskan lampiran. Mohon diketik ya, Kak.`;
+    reply = `Mohon maaf, Kak 🙏 pesan ini tidak berisi teks yang bisa ${currentPersona().name} baca. Pesan suara, gambar, dan file belum bisa ${currentPersona().name} terima saat ini. Mohon diketik ya, Kak.`;
   }
   else reply = await answerStaff(user, m.text);
+  const failure = takeFailure(user.id); // the AI could not answer: the reason is for the admin, not for the chat
+  if (failure) outcome = `tidak bisa dijawab (dikirim permintaan maaf): ${failure}`;
 
   // The answer is one text, or several parts: texts and a document ({ file, filename, caption }, e.g. the invoice PDF)
   let failed = '';

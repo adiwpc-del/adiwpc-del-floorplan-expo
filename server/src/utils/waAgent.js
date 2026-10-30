@@ -71,7 +71,7 @@ export const currentPersona = () => PERSONAS.find(p => p.id === waMeta().persona
 
 // ---------- Reading ----------
 const menuText = (fp) => [
-  `Assalamu'alaikum, Kak 😊 Saya ${currentPersona().name}, admin virtual yang siap membantu (project ${fp.title}).`,
+  `Assalamu'alaikum, Kak 😊 Saya ${currentPersona().name}, admin yang siap membantu (project ${fp.title}).`,
   'Ketik salah satu perintah:',
   '- TERSEDIA : booth yang masih kosong (TERSEDIA 3x3 untuk ukuran tertentu)',
   '- BOOTH A-12 : detail satu booth',
@@ -447,7 +447,7 @@ const ACTION_TOOLS = [
   }
 ];
 
-const systemPrompt = (user, fp, p = currentPersona()) => `Anda adalah ${p.name} (panggilan: ${p.call}), admin virtual muslimah${p.trait ? ` dengan pembawaan ${p.trait}` : ''} yang membantu staf penyelenggara pameran di aplikasi denah pameran (lewat WhatsApp atau chat di aplikasi).
+const systemPrompt = (user, fp, p = currentPersona()) => `Anda adalah ${p.name} (panggilan: ${p.call}), admin muslimah${p.trait ? ` dengan pembawaan ${p.trait}` : ''} yang melayani staf penyelenggara pameran di aplikasi denah pameran (lewat WhatsApp atau chat di aplikasi).
 Yang Anda layani: ${user.name} (${ROLE_NAME[user.role] || user.role}). Project: ${fp.title}. Hari ini: ${new Date().toLocaleDateString('id-ID', { timeZone: 'Asia/Jakarta', day: 'numeric', month: 'long', year: 'numeric' })}.
 
 Aturan data (paling penting):
@@ -468,9 +468,11 @@ Kepribadian dan cara bicara:
 - Panggil pengguna "Kak" atau "Kakak". Sebut diri "saya" atau "${p.name}", tidak pernah "aku" atau "gue".
 - Bahasa Indonesia yang baik, santai namun sopan. Kalimat singkat, jelas, mudah dipahami. Tanpa bahasa gaul berlebihan, singkatan alay, atau kata kasar.
 - Emoji secukupnya dan lembut (😊 🙏 🌸 🤍), paling banyak satu atau dua per pesan.
-- Ungkapan islami yang wajar, tidak berlebihan: di awal percakapan sapa "Assalamu'alaikum, Kak"; jawab salam dengan "Wa'alaikumussalam warahmatullah"; "Insyaallah" untuk rencana; "Alhamdulillah" untuk kabar baik; "Jazakallah khair, Kak" atau "Terima kasih banyak, Kak" untuk berterima kasih; doa penutup "Semoga Allah mudahkan urusan Kakak 🤍" hanya saat percakapan selesai (Kakak berterima kasih atau pamit). Jangan mengulang salam atau doa penutup di setiap pesan.
+- Ungkapan islami yang wajar, tidak berlebihan: di awal percakapan sapa "Assalamu'alaikum, Kak"; jawab "Wa'alaikumussalam warahmatullah" hanya bila pengguna memberi salam (bukan untuk "halo"); "Insyaallah" untuk rencana; "Alhamdulillah" untuk kabar baik; "Jazakallah khair, Kak" atau "Terima kasih banyak, Kak" untuk berterima kasih; doa penutup "Semoga Allah mudahkan urusan Kakak 🤍" hanya saat percakapan selesai (Kakak berterima kasih atau pamit). Jangan mengulang salam atau doa penutup di setiap pesan.
 - Saat pengguna kesal atau komplain: minta maaf dengan tulus, tunjukkan Anda mengerti, lalu bantu cari solusinya.
 - Kalau belum tahu atau datanya tidak ada: katakan jujur ("Mohon maaf, Kak, untuk hal ini saya belum bisa memastikan") dan arahkan untuk mengecek di aplikasi web atau menanyakan ke tim terkait. Jangan menjanjikan menyambungkan ke orang lain.
+- Jangan menyebut diri bot, chatbot, atau AI tanpa ditanya, dan jangan membahas sistem, model, kuota, token, atau layanan di balik layar. Cukup perkenalkan diri sebagai ${p.name}.
+- Kalau pengguna bertanya dengan sungguh-sungguh apakah ia sedang berbicara dengan manusia atau mesin, jawab jujur dan sopan bahwa Anda asisten otomatis dari tim penyelenggara; jangan mengaku manusia. Setelah itu tetap bantu seperti biasa.
 - Tidak boleh: berkata kasar, menyindir, atau membalas emosi; merayu, bercanda yang menjurus, atau menanggapi godaan; berbohong atau menjanjikan hal yang tidak pasti; membahas politik, SARA, atau gosip; berdebat soal agama atau menghakimi keyakinan orang lain; ceramah panjang yang tidak diminta. Permintaan yang tidak pantas ditolak dengan sopan ("Mohon maaf, Kak, untuk hal tersebut saya tidak bisa membantu").`;
 
 // { final }: the system's own summary goes to the staff member; { error }: back to Gemini, which asks again
@@ -489,9 +491,17 @@ const toolHandlers = (user, fp, channel) => ({
   siapkan_invoice: ({ nomor_booth }) => asFinal(invoiceRequest(user, fp, nomor_booth, channel))
 });
 
+// The reason a turn could not be answered, for "Pesan masuk terakhir" (the person on WhatsApp only gets a neutral apology)
+const failures = new Map(); // user id -> reason
+export const takeFailure = (userId) => { const reason = failures.get(userId); failures.delete(userId); return reason; };
+const neutralApology = () => `Mohon maaf, Kak 🙏 ${currentPersona().name} sedang ada kendala untuk menjawab. Mohon coba lagi beberapa saat ya, Kak, atau ketik MENU untuk daftar layanan.`;
+
 async function askGemini(user, fp, text, channel) {
   const out = await chatWithGemini({ memoryKey: user.id, text, system: systemPrompt(user, fp), tools: [...READ_TOOLS, ...ACTION_TOOLS], handlers: toolHandlers(user, fp, channel) });
-  return out.parts || out.text || `Mohon maaf, Kak 🙏 ${currentPersona().name} belum bisa menjawab saat ini: ${out.error}\nKakak tetap bisa memakai perintah biasa, ketik MENU.`;
+  if (out.parts || out.text) return out.parts || out.text;
+  failures.set(user.id, out.error);
+  // the Super Admin testing in Setting sees the technical reason; WhatsApp never hears about quota, tokens or services
+  return channel === 'WhatsApp' ? neutralApology() : `Asisten belum bisa menjawab: ${out.error}\nKetik MENU untuk memakai perintah biasa.`;
 }
 
 // With Gemini on, a command is answered by the system only when its argument is understood; anything else
@@ -515,14 +525,14 @@ function isCommand(cmd, rest, fp) {
  * (so a spoken "ya" that saves a booking is visible). { reply, outcome } — outcome is for "Pesan masuk terakhir".
  */
 export async function answerVoice(user, { url, mimeType }) {
-  const name = currentPersona().name;
-  const askToType = 'Mohon ketik pesannya ya, Kak.';
-  if (!geminiReady()) return { outcome: 'pesan suara: agen Gemini belum aktif', reply: `Mohon maaf, Kak 🙏 pesan suara (voice note) baru bisa ${name} dengarkan bila agen AI Gemini aktif. ${askToType}` };
-  if (!url) return { outcome: 'pesan suara: Fonnte tidak mengirim filenya', reply: `Mohon maaf, Kak 🙏 pesan suara belum bisa ${name} dengarkan karena paket Fonnte nomor ini tidak meneruskan file suara (butuh paket yang mendukung lampiran). ${askToType}` };
+  // the person on WhatsApp gets a neutral sentence; the technical reason goes to "Pesan masuk terakhir" (outcome)
+  const notNow = `Mohon maaf, Kak 🙏 pesan suara belum bisa ${currentPersona().name} terima saat ini. Mohon ketik pesannya ya, Kak.`;
+  if (!geminiReady()) return { outcome: 'pesan suara: agen Gemini belum aktif', reply: notNow };
+  if (!url) return { outcome: 'pesan suara: Fonnte tidak mengirim filenya (paket tanpa lampiran)', reply: notNow };
   const audio = await downloadAudio(url);
-  if (audio.error) return { outcome: `pesan suara: file gagal diambil (${audio.error})`, reply: `Mohon maaf, Kak 🙏 file suaranya tidak bisa ${name} ambil (${audio.error}). ${askToType}` };
+  if (audio.error) return { outcome: `pesan suara: file gagal diambil (${audio.error})`, reply: notNow };
   const heard = await transcribeAudio({ data: audio.data, mimeType });
-  if (heard.error) return { outcome: `pesan suara: Gemini gagal (${heard.error})`, reply: `Mohon maaf, Kak 🙏 ${name} belum bisa mendengarkan pesan suara saat ini: ${heard.error}\n${askToType}` };
+  if (heard.error) return { outcome: `pesan suara: Gemini gagal (${heard.error})`, reply: notNow };
   if (!heard.text) return { outcome: 'pesan suara: tidak terdengar jelas', reply: 'Mohon maaf, Kak 🙏 suaranya tidak terdengar jelas. Boleh diulang atau diketik, Kak?' };
   const parts = [].concat(await answerStaff(user, heard.text));
   const said = `🎙️ Kakak bilang: "${heard.text}"`;

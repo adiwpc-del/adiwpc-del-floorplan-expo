@@ -8,6 +8,7 @@ import { startServer, boothObject, createPublishedFloorplan } from './helpers.js
 const SECRET = 'rahasia-webhook-tes';
 const FP = 'FP-TEST-WA';
 const STAFF = '6281234567890';
+const TECH_WORDS = /kuota|token|kredit|gemini|\bai\b|chat ?bot|\bbot\b|virtual|fonnte|server/i; // never told to the person chatting on WhatsApp
 let s;
 let wa;
 const sent = []; // messages the server sent through the (mock) Fonnte API
@@ -108,8 +109,9 @@ test('voice note tanpa agen Gemini dijawab sopan: diminta mengetik', async () =>
   const n = sent.length;
   await call(text(STAFF, '', { url: 'https://example.test/vn.ogg', extension: 'ogg' }));
   const [msg] = await waitSent(n + 1);
-  assert.match(msg.body.message, /voice note/i);
+  assert.match(msg.body.message, /pesan suara/i);
   assert.match(msg.body.message, /ketik/);
+  assert.doesNotMatch(msg.body.message, TECH_WORDS);
 });
 
 test('pesan tanpa huruf / angka (pesan suara di paket Fonnte tanpa lampiran): dijawab jelas; catatan berisi kolom dan kode karakter, bukan isi', async () => {
@@ -117,7 +119,7 @@ test('pesan tanpa huruf / angka (pesan suara di paket Fonnte tanpa lampiran): di
   await call(text(STAFF, '\u200e ', { name: 'Sari' }));
   const [msg] = await waitSent(n + 1);
   assert.match(msg.body.message, /tidak berisi teks/);
-  assert.match(msg.body.message, /paket Fonnte/);
+  assert.doesNotMatch(msg.body.message, TECH_WORDS);
   const last = (await s.api('GET', '/maintenance/whatsapp', undefined, { as: 'superadmin' })).body.status.lastIncoming;
   assert.equal(last.kind, 'tanpa teks');
   assert.deepEqual(last.fields, ['device', 'inboxid', 'message', 'name', 'sender', 'timestamp']);

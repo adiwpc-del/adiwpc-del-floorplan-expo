@@ -55,7 +55,7 @@ export default function FonnteSettings() {
   const test = status?.lastTest;
   const inbox = status?.lastIncoming;
   const inboxTime = inbox ? new Date(inbox.at).toLocaleString('id-ID', { timeZone: 'Asia/Jakarta', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : '';
-  const inboxBad = inbox && /tidak dijawab|gagal|tidak mengirim|belum aktif/.test(inbox.outcome);
+  const inboxBad = inbox && /tidak dijawab|tidak bisa dijawab|gagal|tidak mengirim|belum aktif/.test(inbox.outcome);
 
   return (
     <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-xs space-y-6 animate-fadeIn">
@@ -141,7 +141,7 @@ export default function FonnteSettings() {
                 <option key={p.id} value={p.id}>{`${p.call}${p.trait ? `: ${p.trait}` : ' (utama)'}`}</option>
               ))}
             </select>
-            <p className="text-[11px] text-slate-500 mt-1">Admin virtual muslimah yang santun: memanggil staf "Kak", menyebut diri "saya", menjawab salam, dan menjaga adab. Dipakai di WhatsApp dan di chat halaman ini.</p>
+            <p className="text-[11px] text-slate-500 mt-1">Admin muslimah yang santun: memanggil staf "Kak", menyebut diri "saya", menjawab salam, dan menjaga adab. Tidak menyebut dirinya bot dan tidak menceritakan kendala teknis (kuota, layanan) di WhatsApp; kendalanya terlihat di "Pesan masuk terakhir". Bila ditanya sungguh-sungguh apakah ia manusia, ia menjawab jujur bahwa ia asisten otomatis tim.</p>
           </div>
           <div>
             <label htmlFor="wa-signature" className="block text-xs font-bold text-slate-700 mb-1">Tanda tangan di akhir pesan (opsional)</label>
