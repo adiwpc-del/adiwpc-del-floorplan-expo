@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { flushSync } from 'react-dom';
 import { 
   Plus, 
   Trash2, 
@@ -25,12 +26,19 @@ import {
   Building2,
   Phone,
   MessageSquare,
-  Tags
+  Tags,
+  Printer,
+  Ban
 } from 'lucide-react';
 import { api } from '../../services/api';
 import BroadcastTenantModal from '../../components/admin/BroadcastTenantModal';
 import GenerateTenantFacilityModal from '../../components/admin/GenerateTenantFacilityModal';
 import FacilityCategoryManager from '../../components/admin/FacilityCategoryManager';
+import FacilityFormA4View from '../../components/admin/FacilityFormA4View';
+import FacilityInvoiceCancelModal from '../../components/admin/FacilityInvoiceCancelModal';
+import FacilityRequestEditModal from '../../components/admin/FacilityRequestEditModal';
+import { downloadFacilityFormPdf } from '../../utils/invoicePdf';
+import { printInvoiceElement } from '../../utils/invoicePrintUtils';
 
 export default function FacilityRequestsPage() {
   const [activeTab, setActiveTab] = useState('requests'); // 'requests' | 'builder'
@@ -43,6 +51,10 @@ export default function FacilityRequestsPage() {
   const [isBroadcastModalOpen, setIsBroadcastModalOpen] = useState(false);
   const [isGenerateTenantModalOpen, setIsGenerateTenantModalOpen] = useState(false);
   const [selectedTenantForModal, setSelectedTenantForModal] = useState(null);
+  const [pdfRequestId, setPdfRequestId] = useState(null);
+  const [cancelInvoiceRequest, setCancelInvoiceRequest] = useState(null);
+  const [editRequest, setEditRequest] = useState(null);
+  const [printSheet, setPrintSheet] = useState(null); // off-screen A4 sheet, only when the server has no PDF engine
 
   // Requests filtering
   const [searchRequest, setSearchRequest] = useState('');
@@ -141,6 +153,35 @@ export default function FacilityRequestsPage() {
       }
     } catch (e) {
       showToast('⚠️ Gagal mengubah status pengajuan');
+    }
+  };
+
+  // One request as PDF: the same A4 template as the tenant's receipt (AGENTS.md §46), filled with what was ordered
+  const handleRequestPdf = async (req) => {
+    if (pdfRequestId) return;
+    setPdfRequestId(req.id);
+    const sheet = {
+      tenant: { boothCode: req.booth_code, companyName: req.company_name, picName: req.pic_name, phone: req.phone, email: req.email, notes: req.notes },
+      form: forms.find(f => f.id === req.form_id) || {},
+      items: req.items || [],
+      mode: 'filled',
+      docNumber: req.id
+    };
+    const namePart = (v) => String(v || '').replace(/[^a-zA-Z0-9_-]+/g, '_');
+    try {
+      const result = await downloadFacilityFormPdf({ ...sheet, fileName: `Pengajuan_Fasilitas_${namePart(req.booth_code)}_${namePart(req.company_name)}.pdf` });
+      if (result.success) {
+        showToast('📄 PDF pengajuan fasilitas berhasil diunduh');
+      } else if (result.unavailable) {
+        showToast('PDF belum bisa dibuat server. Pilih "Simpan sebagai PDF" di dialog cetak.');
+        flushSync(() => setPrintSheet(sheet));
+        await printInvoiceElement('printable-facility-form-a4');
+      } else {
+        showToast(`⚠️ ${result.error}`);
+      }
+    } finally {
+      setPrintSheet(null);
+      setPdfRequestId(null);
     }
   };
 
@@ -531,7 +572,7 @@ export default function FacilityRequestsPage() {
                     <th className="py-3.5 px-4">Booth & Tenant</th>
                     <th className="py-3.5 px-4">PIC & Kontak</th>
                     <th className="py-3.5 px-4">Item Fasilitas Dipesan</th>
-                    <th className="py-3.5 px-4 text-right">Total Tagihan</th>
+                    <th className="py-3.5 px-4 text-right whitespace-nowrap">Total Tagihan</th>
                     <th className="py-3.5 px-4 text-center">Status</th>
                     <th className="py-3.5 px-4 text-right">Aksi</th>
                   </tr>
@@ -541,12 +582,14 @@ export default function FacilityRequestsPage() {
                     const items = req.items || [];
                     const isPending = req.status === 'PENDING';
                     const isInvoiced = req.status === 'INVOICED';
+                    const liveInvoice = req.invoice && req.invoice.status !== 'CANCELED' ? req.invoice : null;
+                    const isOpen = !liveInvoice && !isInvoiced && req.status !== 'REJECTED' && req.status !== 'COMPLETED';
 
                     return (
                       <tr key={req.id} className="hover:bg-slate-50/70 transition-colors">
                         <td className="py-3 px-4">
                           <div className="flex items-center gap-2">
-                            <span className="font-mono font-bold text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded border border-indigo-200 text-[11px]">
+                            <span className="font-mono font-bold text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded border border-indigo-200 text-[11px] whitespace-nowrap shrink-0">
                               {req.booth_code}
                             </span>
                             <span className="font-bold text-slate-900 text-xs">{req.company_name}</span>
@@ -598,10 +641,26 @@ export default function FacilityRequestsPage() {
                           }`}>
                             {req.status}
                           </span>
+                          {req.invoice && (
+                            <span className={`block mt-1 font-mono text-[10px] whitespace-nowrap ${liveInvoice ? 'text-slate-500' : 'text-slate-400 line-through'}`} title={liveInvoice ? 'Invoice aktif' : 'Invoice dibatalkan'}>
+                              {req.invoice.number}
+                            </span>
+                          )}
                         </td>
 
                         <td className="py-3 px-4 text-right">
-                          <div className="flex items-center justify-end gap-1.5">
+                          <div className="flex flex-wrap items-center justify-end gap-1.5 min-w-52">
+                            <button
+                              type="button"
+                              onClick={() => handleRequestPdf(req)}
+                              disabled={Boolean(pdfRequestId)}
+                              className="px-2 py-1 bg-white hover:bg-slate-50 text-indigo-700 rounded-lg text-xs font-semibold border border-indigo-200 transition-colors cursor-pointer flex items-center gap-1 disabled:opacity-50 disabled:cursor-wait whitespace-nowrap"
+                              title="Cetak pengajuan ini sebagai PDF A4, berisi item yang dipesan tenant"
+                            >
+                              <Printer size={12} />
+                              <span>{pdfRequestId === req.id ? 'Membuat…' : 'Cetak PDF'}</span>
+                            </button>
+
                             <button
                               type="button"
                               onClick={() => {
@@ -614,18 +673,54 @@ export default function FacilityRequestsPage() {
                                 });
                                 setIsGenerateTenantModalOpen(true);
                               }}
-                              className="px-2 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-xs font-semibold border border-slate-300 transition-colors cursor-pointer flex items-center gap-1"
+                              className="px-2 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-xs font-semibold border border-slate-300 transition-colors cursor-pointer flex items-center gap-1 whitespace-nowrap"
                               title="Lihat Lembar Formulir A4 & Kirim WA"
                             >
                               <FileText size={12} />
-                              <span>Form PDF</span>
+                              <span>Form & WA</span>
                             </button>
 
-                            {!isInvoiced && req.status !== 'REJECTED' && (
+                            {liveInvoice && (
+                              <button
+                                type="button"
+                                onClick={() => setCancelInvoiceRequest(req)}
+                                className="px-2 py-1 bg-white hover:bg-rose-50 text-rose-700 rounded-lg text-xs font-semibold border border-rose-200 transition-colors cursor-pointer flex items-center gap-1 whitespace-nowrap"
+                                title={`Batalkan invoice ${liveInvoice.number}`}
+                              >
+                                <Ban size={12} />
+                                <span>Batalkan Invoice</span>
+                              </button>
+                            )}
+
+                            {isOpen && (
+                              <button
+                                type="button"
+                                onClick={() => setEditRequest(req)}
+                                className="px-2 py-1 bg-white hover:bg-slate-50 text-slate-700 rounded-lg text-xs font-semibold border border-slate-300 transition-colors cursor-pointer flex items-center gap-1"
+                                title="Ubah item dan jumlah pengajuan ini"
+                              >
+                                <Edit2 size={12} />
+                                <span>Ubah</span>
+                              </button>
+                            )}
+
+                            {req.status === 'REJECTED' && !liveInvoice && (
+                              <button
+                                type="button"
+                                onClick={() => handleStatusChange(req.id, 'PENDING')}
+                                className="px-2 py-1 bg-white hover:bg-slate-50 text-slate-700 rounded-lg text-xs font-semibold border border-slate-300 transition-colors cursor-pointer flex items-center gap-1 whitespace-nowrap"
+                                title="Buka lagi pengajuan yang ditolak"
+                              >
+                                <RotateCcw size={12} />
+                                <span>Buka Lagi</span>
+                              </button>
+                            )}
+
+                            {isOpen && (
                               <button
                                 type="button"
                                 onClick={() => handleGenerateInvoice(req.id)}
-                                className="px-2.5 py-1 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-xs font-semibold flex items-center gap-1 shadow-xs transition-all active:scale-95 cursor-pointer"
+                                className="px-2.5 py-1 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-xs font-semibold flex items-center gap-1 shadow-xs transition-all active:scale-95 cursor-pointer whitespace-nowrap"
                                 title="Terbitkan Invoice Resmi A4 untuk Fasilitas Ini"
                               >
                                 <FileText size={12} />
@@ -644,7 +739,7 @@ export default function FacilityRequestsPage() {
                               </button>
                             )}
 
-                            {req.status !== 'REJECTED' && !isInvoiced && (
+                            {isOpen && (
                               <button
                                 type="button"
                                 onClick={() => handleStatusChange(req.id, 'REJECTED')}
@@ -1087,6 +1182,38 @@ export default function FacilityRequestsPage() {
         initialTenant={selectedTenantForModal}
         showToast={showToast}
       />
+
+      <FacilityInvoiceCancelModal
+        request={cancelInvoiceRequest}
+        onClose={() => setCancelInvoiceRequest(null)}
+        onCanceled={(req, outcome) => {
+          setCancelInvoiceRequest(null);
+          // "Ada perubahan": straight on to the change itself
+          if (outcome === 'change') setEditRequest({ ...req, invoice: null, status: 'APPROVED' });
+          loadAllData();
+        }}
+        showToast={showToast}
+      />
+
+      <FacilityRequestEditModal
+        request={editRequest}
+        form={forms.find(f => f.id === editRequest?.form_id) || activeForm}
+        onClose={() => setEditRequest(null)}
+        onSaved={() => { setEditRequest(null); loadAllData(); }}
+        showToast={showToast}
+      />
+
+      {printSheet && (
+        <div aria-hidden="true" className="fixed left-[-10000px] top-0">
+          <FacilityFormA4View
+            tenant={printSheet.tenant}
+            form={printSheet.form}
+            selectedItems={printSheet.items}
+            mode={printSheet.mode}
+            docNumber={printSheet.docNumber}
+          />
+        </div>
+      )}
     </div>
   );
 }

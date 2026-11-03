@@ -5,18 +5,20 @@ export const ROLE_LABELS = {
   finance: 'Keuangan',
   sales: 'Sales',
   operations: 'Operasional',
-  developer: 'Developer'
+  developer: 'Developer',
+  facility: 'Fasilitas'
 };
 
 // Sales: the Studio (view the floorplan and register tenants, no editing), Data Exhibitor (open / send invoices), Fasilitas
 // Operations: the Studio (full editing and tenant registration), Denah Operasional, Fasilitas
+// Facility: only Fasilitas
 export const PAGE_ACCESS = {
   analytics: ['superadmin', 'finance'],
   floorplan: ['superadmin', 'sales', 'operations'],
   ops: ['superadmin', 'operations'],
   exhibitors: ['superadmin', 'finance', 'sales'],
   invoices: ['superadmin', 'finance'],
-  facilities: ['superadmin', 'finance', 'sales', 'operations'],
+  facilities: ['superadmin', 'finance', 'sales', 'operations', 'facility'],
   settings: ['superadmin'],
   users: ['superadmin'],
   audit: ['superadmin'],
@@ -36,5 +38,6 @@ export const HOME_PAGE = {
   finance: '/admin/invoices',
   sales: '/admin/floorplan',
   operations: '/admin/ops',
-  developer: '/admin/maintenance'
+  developer: '/admin/maintenance',
+  facility: '/admin/facilities'
 };

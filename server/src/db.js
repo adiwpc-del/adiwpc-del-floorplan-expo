@@ -617,14 +617,14 @@ if (facilityFormCount === 0) {
   );
 }
 
-// Users & Roles (superadmin, finance, sales, operations, developer)
+// Users & Roles (superadmin, finance, sales, operations, developer, facility)
 db.exec(`
   CREATE TABLE IF NOT EXISTS users (
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL,
     email TEXT NOT NULL UNIQUE COLLATE NOCASE,
     phone TEXT DEFAULT '',
-    role TEXT NOT NULL CHECK (role IN ('superadmin', 'finance', 'sales', 'operations', 'developer')),
+    role TEXT NOT NULL CHECK (role IN ('superadmin', 'finance', 'sales', 'operations', 'developer', 'facility')),
     password_hash TEXT NOT NULL,
     is_active INTEGER DEFAULT 1,
     last_login_at DATETIME,
@@ -859,34 +859,41 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_audit_user ON audit_logs(user_id);
 `);
 
-// Roles "operations" (Tim Operasional) and "developer" (Pusat Maintenance): older databases have a CHECK
-// constraint without them, rebuild the table once
+// New roles ("facility" is the latest, AGENTS.md §46): older databases have a CHECK constraint without them, so the table
+// is rebuilt once, after a copy of the database. Foreign keys are off meanwhile: DROP TABLE would otherwise cascade into
+// `sessions` and log everyone out.
 try {
   const usersSql = db.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'users'").get()?.sql || '';
-  if (usersSql && !usersSql.includes("'developer'")) {
-    db.transaction(() => {
-      db.exec(`
-        CREATE TABLE users_new (
-          id TEXT PRIMARY KEY,
-          name TEXT NOT NULL,
-          email TEXT NOT NULL UNIQUE COLLATE NOCASE,
-          phone TEXT DEFAULT '',
-          role TEXT NOT NULL CHECK (role IN ('superadmin', 'finance', 'sales', 'operations', 'developer')),
-          password_hash TEXT NOT NULL,
-          is_active INTEGER DEFAULT 1,
-          last_login_at DATETIME,
-          created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-          updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-        );
-        INSERT INTO users_new (id, name, email, phone, role, password_hash, is_active, last_login_at, created_at, updated_at)
-          SELECT id, name, email, phone, role, password_hash, is_active, last_login_at, created_at, updated_at FROM users;
-        DROP TABLE users;
-        ALTER TABLE users_new RENAME TO users;
-      `);
-    })();
+  if (usersSql && !usersSql.includes("'facility'")) {
+    const widened = usersSql
+      .replace(/CHECK\s*\(\s*role\s+IN\s*\([^)]*\)\s*\)/i, "CHECK (role IN ('superadmin', 'finance', 'sales', 'operations', 'developer', 'facility'))")
+      .replace(/CREATE TABLE\s+("?users"?)/i, 'CREATE TABLE users_new');
+    if (!widened.includes("'facility'") || !widened.includes('users_new')) throw new Error('definisi tabel users tidak dikenali');
+    const backupsDir = path.join(dataDir, 'backups');
+    fs.mkdirSync(backupsDir, { recursive: true });
+    const copy = path.join(backupsDir, `pre-migration_role-fasilitas_${new Date().toISOString().replace(/[:.]/g, '-')}.db`);
+    db.prepare('VACUUM INTO ?').run(copy);
+    const extras = db.prepare("SELECT sql FROM sqlite_master WHERE tbl_name = 'users' AND type IN ('index', 'trigger') AND sql IS NOT NULL").all();
+    const before = db.prepare('SELECT COUNT(*) AS n FROM users').get().n;
+    const foreignKeys = db.pragma('foreign_keys', { simple: true });
+    db.pragma('foreign_keys = OFF');
+    try {
+      db.transaction(() => {
+        db.exec(widened);
+        db.exec('INSERT INTO users_new SELECT * FROM users');
+        if (db.prepare('SELECT COUNT(*) AS n FROM users_new').get().n !== before) throw new Error('jumlah baris tidak sama');
+        db.exec('DROP TABLE users');
+        db.exec('ALTER TABLE users_new RENAME TO users');
+        extras.forEach(x => db.exec(x.sql));
+      })();
+    } finally {
+      db.pragma(`foreign_keys = ${foreignKeys ? 'ON' : 'OFF'}`);
+    }
+    console.log(`👥 Role Fasilitas ditambahkan (${before} akun dipertahankan, salinan: backups/${path.basename(copy)}).`);
   }
 } catch (e) {
-  console.error('Migrasi role users gagal:', e.message);
+  // The app keeps working: only an account with the new role cannot be saved
+  console.error('Migrasi role users gagal:', e);
 }
 
 // Operational layer (Denah Operasional): one layer per sales floorplan, stored apart from the sales canvas.

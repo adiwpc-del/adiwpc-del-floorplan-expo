@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Search, UserPlus, Pencil, X, ShieldCheck, Wallet, Briefcase, Eye, EyeOff, UserCog, HardHat, Wrench } from 'lucide-react';
+import { Search, UserPlus, Pencil, X, ShieldCheck, Wallet, Briefcase, Eye, EyeOff, UserCog, HardHat, Wrench, Package } from 'lucide-react';
 import { api } from '../../services/api';
 import { useAuth } from '../../context/AuthContext';
 
@@ -38,6 +38,13 @@ const ROLE_OPTIONS = [
     description: 'Memantau error website di Pusat Maintenance tanpa akses data tenant, harga & tagihan',
     icon: Wrench,
     badge: 'bg-sky-50 text-sky-700 border-sky-200'
+  },
+  {
+    key: 'facility',
+    label: 'Fasilitas',
+    description: 'Hanya membuka menu Fasilitas: formulir, pengajuan tenant, dan invoice fasilitas',
+    icon: Package,
+    badge: 'bg-teal-50 text-teal-700 border-teal-200'
   }
 ];
 const ROLE_MAP = Object.fromEntries(ROLE_OPTIONS.map(r => [r.key, r]));

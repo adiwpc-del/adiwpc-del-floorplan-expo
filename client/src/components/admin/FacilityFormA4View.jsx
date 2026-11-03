@@ -459,6 +459,14 @@ export default function FacilityFormA4View({
                 </div>
               </div>
             )}
+
+            {/* The tenant's own note on a submitted request */}
+            {mode === 'filled' && tenant.notes && (
+              <div className="pt-2 text-[10px] text-slate-600" style={{ breakInside: 'avoid' }}>
+                <span className="font-bold text-slate-800">Catatan tenant: </span>
+                <span className="whitespace-pre-line">{tenant.notes}</span>
+              </div>
+            )}
           </div>
         </div>
 

@@ -105,6 +105,8 @@ const AUDIT_RULES = [
     describe: (req) => ({ target: 'Kategori fasilitas', summary: `${String(req.body?.from || '').trim()} → ${String(req.body?.to || '').trim()}` }) },
   { method: 'PUT', path: /^\/facilities\/requests\/([^/]+)\/status$/, category: 'Fasilitas', action: 'Ubah status permintaan fasilitas',
     describe: (req, m) => ({ target: m[1], summary: `→ ${req.body.status || '?'}` }) },
+  { method: 'PUT', path: /^\/facilities\/requests\/([^/]+)$/, category: 'Fasilitas', action: 'Ubah isi permintaan fasilitas',
+    describe: (req, m) => ({ target: m[1], summary: `${Array.isArray(req.body?.items) ? req.body.items.length : 0} item` }) },
   { method: 'POST', path: /^\/facilities\/requests\/([^/]+)\/generate-invoice$/, category: 'Fasilitas', action: 'Terbitkan invoice fasilitas',
     describe: (req, m) => ({ target: m[1] }) },
 

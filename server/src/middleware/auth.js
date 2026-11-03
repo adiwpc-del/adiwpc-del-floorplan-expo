@@ -69,6 +69,7 @@ const SALES = ['sales'];
 const FINANCE = ['finance'];
 const OPERATIONS = ['operations'];
 const DEVELOPER = ['developer'];
+const FACILITY = ['facility'];
 const WRITE = ['POST', 'PUT', 'PATCH', 'DELETE'];
 
 const ACCESS_RULES = [
@@ -122,10 +123,10 @@ const ACCESS_RULES = [
   { methods: WRITE, path: /^\/payment-methods(\/.*)?$/, access: [] },
 
   // Facility portal (tenant forms are public). The Fasilitas menu (forms, requests, status, facility invoice, tenant
-  // list for broadcast) is used by Finance, Sales and Operations too (AGENTS.md §46)
+  // list for broadcast) is used by Finance, Sales, Operations and the Fasilitas role too (AGENTS.md §46)
   { methods: ['GET'], path: /^\/facilities\/forms(\/[^/]+)?$/, access: 'public' },
   { methods: ['POST'], path: /^\/facilities\/requests\/submit$/, access: 'public' },
-  { methods: ['GET', ...WRITE], path: /^\/facilities(\/.*)?$/, access: [...FINANCE, ...SALES, ...OPERATIONS] },
+  { methods: ['GET', ...WRITE], path: /^\/facilities(\/.*)?$/, access: [...FINANCE, ...SALES, ...OPERATIONS, ...FACILITY] },
 
   // Denah Operasional: the operations team edits its own layer; sales only views it (overlay in the sales Studio)
   { methods: ['GET'], path: /^\/ops\/[^/]+\/public$/, access: 'public' },
@@ -162,10 +163,13 @@ const OPERATIONS_AREA = [
 ];
 // Developer: only the Pusat Maintenance (never tenant, price, invoice or user data)
 const DEVELOPER_AREA = [/^\/maintenance(\/.*)?$/, /^\/notifications(\/.*)?$/, /^\/chat(\/.*)?$/, /^\/auth\//, /^\/users\/roles$/, /^\/health$/];
+// Fasilitas: only the Fasilitas menu (never the Studio, exhibitors, invoices pages, stats, settings or users)
+const FACILITY_AREA = [/^\/facilities(\/.*)?$/, /^\/notifications(\/.*)?$/, /^\/chat(\/.*)?$/, /^\/auth\//, /^\/users\/roles$/, /^\/health$/];
 // Roles limited to their own area; on public endpoints they are treated as anonymous visitors
 const RESTRICTED_AREAS = {
   operations: { area: OPERATIONS_AREA, error: 'Role Operasional hanya dapat mengakses Studio dan Denah Operasional' },
-  developer: { area: DEVELOPER_AREA, error: 'Role Developer hanya dapat mengakses Pusat Maintenance' }
+  developer: { area: DEVELOPER_AREA, error: 'Role Developer hanya dapat mengakses Pusat Maintenance' },
+  facility: { area: FACILITY_AREA, error: 'Role Fasilitas hanya dapat mengakses menu Fasilitas' }
 };
 
 const findRule = (method, path) =>

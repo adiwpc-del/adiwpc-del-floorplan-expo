@@ -148,3 +148,78 @@ test('PDF formulir fasilitas dibuat server (Download PDF A4): staf menu Fasilita
   assert.match(res.headers.get('content-disposition'), /Formulir_Fasilitas_A-01_Kopi_Satu\.pdf/);
   assert.equal(Buffer.from(await res.arrayBuffer()).subarray(0, 5).toString(), '%PDF-');
 });
+
+const issueFacilityInvoice = async (booth) => {
+  const id = (await submit(booth)).body.request.id;
+  const r = await s.api('POST', `/facilities/requests/${id}/generate-invoice`, undefined, { as: 'sales' });
+  assert.equal(r.status, 200);
+  return { id, invoiceId: r.body.invoiceId, number: r.body.invoice.invoice_number };
+};
+const invoiceOf = async (invoiceId) => (await s.api('GET', `/invoices/${invoiceId}`, undefined, { as: 'finance' })).body;
+const REASON = 'Tenant tidak jadi ikut pameran';
+
+test('batalkan invoice fasilitas "tidak jadi": invoice CANCELED (tetap tercatat), pengajuan REJECTED, tercatat di Log Aktivitas', async () => {
+  const { id, invoiceId, number } = await issueFacilityInvoice('C-01');
+  assert.equal((await requestOf(id)).invoice.number, number, 'baris pengajuan menunjukkan invoice-nya');
+
+  const url = `/facilities/requests/${id}/cancel-invoice`;
+  assert.equal((await s.api('POST', url, { reason: REASON, outcome: 'rejected' })).status, 401);
+  assert.equal((await s.api('POST', url, { reason: 'pendek', outcome: 'rejected' }, { as: 'sales' })).body.code, 'REASON_REQUIRED');
+  assert.equal((await s.api('POST', url, { reason: REASON, outcome: 'apa' }, { as: 'sales' })).status, 400);
+
+  const ok = await s.api('POST', url, { reason: REASON, outcome: 'rejected' }, { as: 'sales' });
+  assert.equal(ok.status, 200);
+  const inv = await invoiceOf(invoiceId);
+  assert.equal((inv.invoice || inv).payment_status, 'CANCELED');
+  const reqRow = await requestOf(id);
+  assert.equal(reqRow.status, 'REJECTED');
+  assert.equal(reqRow.invoice.status, 'CANCELED');
+
+  assert.equal((await s.api('POST', url, { reason: REASON, outcome: 'rejected' }, { as: 'sales' })).body.code, 'NO_ACTIVE_INVOICE', 'tidak bisa dua kali');
+  const logs = (await s.api('GET', '/audit-logs?limit=20', undefined, { as: 'superadmin' })).body;
+  assert.match(JSON.stringify(logs), new RegExp(`Batalkan invoice fasilitas[\\s\\S]*${number}`));
+});
+
+test('batalkan invoice fasilitas "ada perubahan": pengajuan bisa diubah lalu diterbitkan invoice baru bernomor lain', async () => {
+  const { id, number } = await issueFacilityInvoice('C-02');
+  const edit = { items: [{ name: 'Tambahan Listrik 900W', category: 'Listrik', unit: 'Unit', price: 750000, qty: 3 }], notes: 'Tambah satu' };
+  assert.equal((await s.api('PUT', `/facilities/requests/${id}`, edit, { as: 'sales' })).body.code, 'REQUEST_INVOICED', 'selama invoice aktif pengajuan terkunci');
+
+  assert.equal((await s.api('POST', `/facilities/requests/${id}/cancel-invoice`, { reason: REASON, outcome: 'change' }, { as: 'operations' })).status, 200);
+  let row = await requestOf(id);
+  assert.equal(row.status, 'APPROVED');
+  assert.equal(row.invoice, null);
+
+  assert.equal((await s.api('PUT', `/facilities/requests/${id}`, { items: [] }, { as: 'sales' })).status, 400);
+  assert.equal((await s.api('PUT', `/facilities/requests/${id}`, { items: [{ name: 'X', price: 1000, qty: 0 }] }, { as: 'sales' })).status, 400);
+  assert.equal((await s.api('PUT', `/facilities/requests/${id}`, edit, { as: 'sales' })).status, 200);
+  row = await requestOf(id);
+  assert.equal(row.total_amount, 2250000, 'total dihitung server');
+  assert.equal(row.notes, 'Tambah satu');
+
+  const again = await s.api('POST', `/facilities/requests/${id}/generate-invoice`, undefined, { as: 'sales' });
+  assert.equal(again.status, 200);
+  assert.notEqual(again.body.invoice.invoice_number, number);
+  assert.equal(again.body.invoice.total_amount, 2250000);
+});
+
+test('invoice fasilitas tidak terbit dua kali; yang sudah dibayar hanya dibatalkan Super Admin dengan mengetik nomornya', async () => {
+  const { id, invoiceId, number } = await issueFacilityInvoice('C-03');
+  assert.equal((await s.api('POST', `/facilities/requests/${id}/generate-invoice`, undefined, { as: 'sales' })).body.code, 'REQUEST_INVOICED');
+
+  assert.equal((await s.api('POST', `/invoices/${invoiceId}/status`, { status: 'PAID' }, { as: 'finance' })).status, 200);
+  const url = `/facilities/requests/${id}/cancel-invoice`;
+  const body = { reason: REASON, outcome: 'rejected' };
+  assert.equal((await s.api('POST', url, body, { as: 'finance' })).body.code, 'INVOICE_PAID');
+  assert.equal((await s.api('POST', url, body, { as: 'superadmin' })).body.code, 'CONFIRM_NUMBER');
+  assert.equal((await s.api('POST', url, { ...body, confirmNumber: number }, { as: 'superadmin' })).status, 200);
+  assert.equal((await requestOf(id)).status, 'REJECTED');
+});
+
+test('invoice fasilitas dibatalkan dari menu Invoice: pengajuan REJECTED; diaktifkan lagi: kembali INVOICED', async () => {
+  const { id, invoiceId } = await issueFacilityInvoice('C-04');
+  assert.equal((await s.api('POST', `/invoices/${invoiceId}/status`, { status: 'CANCELED' }, { as: 'finance' })).status, 200);
+  assert.equal((await requestOf(id)).status, 'REJECTED');
+  assert.equal((await s.api('POST', `/invoices/${invoiceId}/status`, { status: 'UNPAID' }, { as: 'finance' })).status, 200);
+  assert.equal((await requestOf(id)).status, 'INVOICED');
+});

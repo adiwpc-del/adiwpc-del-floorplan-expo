@@ -309,7 +309,7 @@ export default function PublicFacilityRequestPage() {
             form={form}
             selectedItems={receiptItems}
             docNumber={submittedData.id}
-            tenant={{ boothCode: submittedData.booth_code, companyName: submittedData.company_name, picName: submittedData.pic_name, phone: submittedData.phone, email: submittedData.email }}
+            tenant={{ boothCode: submittedData.booth_code, companyName: submittedData.company_name, picName: submittedData.pic_name, phone: submittedData.phone, email: submittedData.email, notes: submittedData.notes }}
           />
         </div>
       </main>

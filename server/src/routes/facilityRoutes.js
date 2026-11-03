@@ -1,9 +1,12 @@
 import express from 'express';
 import db from '../db.js';
 import crypto from 'crypto';
-import { nextInvoiceNumber } from '../utils/contractBilling.js';
+import { nextInvoiceNumber, invoicePaidAmount } from '../utils/contractBilling.js';
 import { renderFacilityFormPdf, printBaseUrl, PdfEngineError } from '../utils/pdfRenderer.js';
 import { invoiceDesign } from './invoiceRoutes.js';
+import { writeAuditLog } from '../middleware/audit.js';
+import { clientIp } from '../middleware/auth.js';
+import { canDeletePaidInvoice, cleanDeleteReason, sameInvoiceNumber, DELETE_REASON_MIN } from '../../../shared/invoicePermissions.js';
 
 const router = express.Router();
 
@@ -19,6 +22,15 @@ function safeJsonParse(data, fallback = []) {
     return fallback;
   }
 }
+
+// The invoice issued for a request, unless it was deleted (a deleted one is in the invoice trash, §31)
+const invoiceOfRequest = (request) => (request.invoice_id
+  ? db.prepare('SELECT * FROM invoices WHERE id = ? AND deleted_at IS NULL').get(request.invoice_id)
+  : null);
+const isCanceled = (invoice) => String(invoice?.payment_status || '').toUpperCase() === 'CANCELED';
+const invoiceBrief = (invoice) => (invoice
+  ? { id: invoice.id, number: invoice.invoice_number, status: String(invoice.payment_status || '').toUpperCase(), total: Number(invoice.total_amount) || 0, paid: invoicePaidAmount(invoice) }
+  : null);
 
 /**
  * 1. GET /api/facilities/forms
@@ -241,7 +253,8 @@ router.get('/requests', (req, res) => {
 
     const requests = db.prepare(query).all(...params).map(r => ({
       ...r,
-      items: safeJsonParse(r.items_json, [])
+      items: safeJsonParse(r.items_json, []),
+      invoice: invoiceBrief(invoiceOfRequest(r))
     }));
 
     res.json({ success: true, requests });
@@ -494,6 +507,13 @@ router.post('/requests/:id/generate-invoice', (req, res) => {
       return res.status(404).json({ success: false, message: 'Pengajuan fasilitas tidak ditemukan' });
     }
 
+    // One request, one live invoice (a double click, or a request reopened while its invoice came back)
+    const current = invoiceOfRequest(request);
+    if (current && !isCanceled(current)) {
+      db.prepare("UPDATE facility_requests SET status = 'INVOICED', updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(id);
+      return res.status(409).json({ success: false, code: 'REQUEST_INVOICED', message: `Pengajuan ini sudah punya invoice ${current.invoice_number}.` });
+    }
+
     // Get form details for event info
     const form = db.prepare('SELECT * FROM facility_forms WHERE id = ?').get(request.form_id);
     const eventTitle = form?.event_title || 'Indonesia International Expo 2026';
@@ -555,6 +575,88 @@ router.post('/requests/:id/generate-invoice', (req, res) => {
   } catch (error) {
     console.error('Error generating invoice for facility request:', error);
     res.status(500).json({ success: false, message: `Gagal membuat invoice fasilitas: ${error.message}` });
+  }
+});
+
+/**
+ * PUT /api/facilities/requests/:id { items, notes }: correct a request ("Ubah"), only while it has no live invoice.
+ * The total is computed here. An issued invoice is changed by canceling it first (below), then issuing a new one.
+ */
+router.put('/requests/:id', (req, res) => {
+  try {
+    const request = db.prepare('SELECT * FROM facility_requests WHERE id = ? AND deleted_at IS NULL').get(req.params.id);
+    if (!request) return res.status(404).json({ success: false, message: 'Pengajuan fasilitas tidak ditemukan' });
+    const current = invoiceOfRequest(request);
+    if (current && !isCanceled(current)) {
+      return res.status(409).json({ success: false, code: 'REQUEST_INVOICED', message: `Pengajuan ini sudah punya invoice ${current.invoice_number}. Batalkan invoice-nya lebih dulu.` });
+    }
+    const raw = req.body?.items;
+    const valid = Array.isArray(raw) && raw.length > 0 && raw.length <= 300 && raw.every(i =>
+      String(i?.name || '').trim() && Number.isInteger(Number(i.qty)) && Number(i.qty) >= 1 && Number(i.qty) <= 9999 && Number(i.price) >= 0);
+    if (!valid) return res.status(400).json({ success: false, message: 'Pilih minimal 1 item dengan jumlah yang benar.' });
+    const items = raw.map(i => ({ ...i, name: String(i.name).trim(), qty: Number(i.qty), price: Number(i.price) }));
+    const total = items.reduce((sum, i) => sum + i.price * i.qty, 0);
+    const notes = req.body.notes === undefined ? request.notes : String(req.body.notes || '').trim().slice(0, 1000);
+    db.prepare('UPDATE facility_requests SET items_json = ?, total_amount = ?, notes = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
+      .run(JSON.stringify(items), total, notes, request.id);
+    res.json({ success: true, message: `Pengajuan booth ${request.booth_code} diperbarui.` });
+  } catch (error) {
+    console.error('Error updating facility request:', error);
+    res.status(500).json({ success: false, message: 'Gagal memperbarui pengajuan fasilitas' });
+  }
+});
+
+/**
+ * POST /api/facilities/requests/:id/cancel-invoice { reason, outcome, confirmNumber }: the tenant withdrew or the order
+ * changed (AGENTS.md §46). The invoice stays on record as CANCELED; its number is never reused.
+ * outcome 'rejected' = tenant tidak jadi (request REJECTED); 'change' = ada perubahan (request APPROVED, open for "Ubah"
+ * and a new invoice). An invoice with a payment: Super Admin only, after typing its number (same rule as §31).
+ */
+router.post('/requests/:id/cancel-invoice', (req, res) => {
+  try {
+    const request = db.prepare('SELECT * FROM facility_requests WHERE id = ? AND deleted_at IS NULL').get(req.params.id);
+    if (!request) return res.status(404).json({ success: false, message: 'Pengajuan fasilitas tidak ditemukan' });
+    const invoice = invoiceOfRequest(request);
+    if (!invoice || isCanceled(invoice)) return res.status(409).json({ success: false, code: 'NO_ACTIVE_INVOICE', message: 'Pengajuan ini tidak punya invoice aktif.' });
+
+    const { outcome, confirmNumber } = req.body || {};
+    if (!['rejected', 'change'].includes(outcome)) return res.status(400).json({ success: false, message: 'Pilih tindak lanjut pengajuan.' });
+    const paid = invoicePaidAmount(invoice);
+    if (paid > 0 && !canDeletePaidInvoice(req.user)) {
+      return res.status(409).json({ success: false, code: 'INVOICE_PAID', message: `Invoice ${invoice.invoice_number} sudah menerima pembayaran. Hanya Super Admin yang dapat membatalkannya.` });
+    }
+    const reason = cleanDeleteReason(req.body?.reason);
+    if (!reason) return res.status(400).json({ success: false, code: 'REASON_REQUIRED', message: `Alasan pembatalan wajib diisi (minimal ${DELETE_REASON_MIN} karakter).` });
+    if (paid > 0 && !sameInvoiceNumber(confirmNumber, invoice.invoice_number)) {
+      return res.status(400).json({ success: false, code: 'CONFIRM_NUMBER', message: `Ketik ulang nomor invoice ${invoice.invoice_number} untuk membatalkan invoice yang sudah ada pembayarannya.` });
+    }
+
+    db.transaction(() => {
+      // paid_amount stays: the record of what was received before canceling, same as POST /invoices/:id/status
+      db.prepare("UPDATE invoices SET payment_status = 'CANCELED', remaining_amount = 0, notes = TRIM(COALESCE(notes, '') || char(10) || ?), updated_at = CURRENT_TIMESTAMP WHERE id = ?")
+        .run(`Dibatalkan: ${reason}`, invoice.id);
+      if (outcome === 'rejected') {
+        // invoice_id stays, so activating the invoice again in Manajemen Invoice brings the request back
+        db.prepare("UPDATE facility_requests SET status = 'REJECTED', updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(request.id);
+      } else {
+        db.prepare("UPDATE facility_requests SET status = 'APPROVED', invoice_id = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(request.id);
+      }
+    })();
+
+    req.skipAudit = true; // written here with the invoice number, amount and reason
+    writeAuditLog({
+      user: req.user, category: 'Fasilitas', action: 'Batalkan invoice fasilitas',
+      target: `${invoice.invoice_number} (${request.company_name}, booth ${request.booth_code})`,
+      summary: [`Rp ${(Number(invoice.total_amount) || 0).toLocaleString('id-ID')}`, paid > 0 ? `sudah dibayar Rp ${paid.toLocaleString('id-ID')}` : '',
+        outcome === 'rejected' ? 'Tenant tidak jadi' : 'Ada perubahan', `Alasan: ${reason}`].filter(Boolean).join(' · '),
+      method: req.method, path: `/api/facilities${req.path}`, statusCode: 200, ip: clientIp(req),
+      details: { invoiceId: invoice.id, requestId: request.id, outcome, reason, paid }
+    });
+
+    res.json({ success: true, message: `Invoice ${invoice.invoice_number} dibatalkan.` });
+  } catch (error) {
+    console.error('Error canceling facility invoice:', error);
+    res.status(500).json({ success: false, message: 'Gagal membatalkan invoice fasilitas' });
   }
 });
 

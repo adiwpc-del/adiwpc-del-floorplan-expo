@@ -11,7 +11,8 @@ export const USER_ROLES = [
   { key: 'finance', label: 'Keuangan', description: 'Mengelola invoice, status pembayaran, dan laporan keuangan' },
   { key: 'sales', label: 'Sales', description: 'Mengelola booking booth, data exhibitor, dan floorplan' },
   { key: 'operations', label: 'Operasional', description: 'Mengelola Denah Operasional (listrik, CCTV, APAR, setup booth) tanpa akses harga & tagihan' },
-  { key: 'developer', label: 'Developer', description: 'Memantau error website di Pusat Maintenance tanpa akses data tenant, harga & tagihan' }
+  { key: 'developer', label: 'Developer', description: 'Memantau error website di Pusat Maintenance tanpa akses data tenant, harga & tagihan' },
+  { key: 'facility', label: 'Fasilitas', description: 'Hanya membuka menu Fasilitas: formulir, pengajuan tenant, dan invoice fasilitas' }
 ];
 const ROLE_KEYS = USER_ROLES.map(r => r.key);
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;

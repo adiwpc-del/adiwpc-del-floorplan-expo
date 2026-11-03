@@ -1390,6 +1390,15 @@ router.post('/:id/status', (req, res) => {
       if (CONTRACT_KINDS.includes(invoiceKind) && fpId && (bCode || bId)) {
         recalcContract(fpId, bCode, bId);
       }
+
+      // 3. A facility invoice canceled here rejects its request; active again: invoiced again (§46, same as delete / restore)
+      if (invoiceKind === 'facility') {
+        if (validStatus === 'CANCELED') {
+          db.prepare("UPDATE facility_requests SET status = 'REJECTED', updated_at = CURRENT_TIMESTAMP WHERE invoice_id = ? AND deleted_at IS NULL").run(id);
+        } else if (String(invoice.payment_status || '').toUpperCase() === 'CANCELED') {
+          db.prepare("UPDATE facility_requests SET status = 'INVOICED', updated_at = CURRENT_TIMESTAMP WHERE invoice_id = ? AND status = 'REJECTED' AND deleted_at IS NULL").run(id);
+        }
+      }
     });
 
     updateTransaction();

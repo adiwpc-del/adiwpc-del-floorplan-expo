@@ -1091,6 +1091,32 @@ export const api = {
   },
 
   // 43. Generate Official A4 Invoice for Facility Request
+  async updateFacilityRequest(id, data) {
+    try {
+      const res = await apiFetch(`${API_BASE_URL}/facilities/requests/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data)
+      });
+      return await res.json();
+    } catch (e) {
+      return { success: false, error: e.message || 'Koneksi server gagal' };
+    }
+  },
+
+  async cancelFacilityInvoice(id, data) {
+    try {
+      const res = await apiFetch(`${API_BASE_URL}/facilities/requests/${id}/cancel-invoice`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data)
+      });
+      return await res.json();
+    } catch (e) {
+      return { success: false, error: e.message || 'Koneksi server gagal' };
+    }
+  },
+
   async generateFacilityInvoice(id) {
     try {
       const res = await apiFetch(`${API_BASE_URL}/facilities/requests/${id}/generate-invoice`, {
