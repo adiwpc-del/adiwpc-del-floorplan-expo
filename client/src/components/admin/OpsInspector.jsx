@@ -241,15 +241,15 @@ export function OpsElementSection({ element, boothCodes = [], conflictCodes = nu
 function SummaryPanel({ opsObjects, booths, boothOps, conflicts, orphans, layer, onFocusElement }) {
   const types = opsTypeCounts(opsObjects);
   const statusCounts = Object.fromEntries(Object.keys(SETUP_STATUS).map(k => [k, 0]));
-  let watt = 0, water = 0, internet = 0, special = 0;
+  const sum = { special: { count: 0, area: 0 }, standard: { count: 0, area: 0 } };
   booths.forEach(b => {
     const d = boothOps[boothKeyOf(b.boothData)];
-    if (d?.specialDesign) special++;
+    const s = d?.specialDesign ? sum.special : sum.standard;
+    s.count++;
+    s.area += (Number(b.boothData?.widthM) || 0) * (Number(b.boothData?.heightM) || 0);
     statusCounts[d?.setupStatus || 'belum_datang']++;
-    watt += Number(d?.powerWatt) || 0;
-    if (d?.waterNeeded) water++;
-    if (d?.internet && d.internet !== 'tidak') internet++;
   });
+  const m2 = (v) => `${v.toLocaleString('id-ID', { maximumFractionDigits: 2 })} m²`;
   const warnings = [
     ...[...conflicts.entries()].map(([el, codes]) => ({ el, text: `${captionText(el)} bertabrakan dengan booth ${codes.join(', ')}`, tone: 'rose' })),
     ...[...orphans].map(el => ({ el, text: `${captionText(el)}: booth induk sudah dihapus`, tone: 'orange' }))
@@ -265,11 +265,14 @@ function SummaryPanel({ opsObjects, booths, boothOps, conflicts, orphans, layer,
         <div className="bg-slate-900 text-white p-4 rounded-xl border border-slate-800 space-y-3">
           <h3 className="text-xs font-semibold text-amber-300 uppercase tracking-wider">Ringkasan Operasional</h3>
           <div className="grid grid-cols-2 gap-2">
-            <div className="bg-slate-800 p-2.5 rounded-lg"><div className="text-[10px] text-slate-400">Elemen Operasional</div><div className="text-xl font-bold">{opsObjects.length}</div></div>
-            <div className="bg-slate-800 p-2.5 rounded-lg"><div className="text-[10px] text-slate-400">Total Listrik Booth</div><div className="text-lg font-bold">{watt.toLocaleString('id-ID')} W</div></div>
-            <div className="bg-slate-800 p-2.5 rounded-lg"><div className="text-[10px] text-slate-400">Booth Butuh Air</div><div className="text-xl font-bold">{water}</div></div>
-            <div className="bg-slate-800 p-2.5 rounded-lg"><div className="text-[10px] text-slate-400">Booth Butuh Internet</div><div className="text-xl font-bold">{internet}</div></div>
-            <div className="bg-slate-800 p-2.5 rounded-lg col-span-2"><div className="text-[10px] text-slate-400">Booth Special Design</div><div className="text-xl font-bold text-violet-300">{special}</div></div>
+            {[['Special Design', sum.special, 'text-violet-300'], ['Standar', sum.standard, 'text-white']].map(([label, v, tone]) => (
+              <div key={label} className="bg-slate-800 p-2.5 rounded-lg space-y-1.5">
+                <div className="text-[10px] text-slate-400">Booth {label}</div>
+                <div className={`text-xl font-bold tabular-nums ${tone}`}>{v.count} <span className="text-xs font-medium text-slate-400">booth</span></div>
+                <div className="text-[10px] text-slate-400 pt-1.5 border-t border-slate-700">Total luas</div>
+                <div className={`text-base font-bold tabular-nums ${tone}`}>{m2(v.area)}</div>
+              </div>
+            ))}
           </div>
         </div>
 
