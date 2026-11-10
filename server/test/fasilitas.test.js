@@ -223,3 +223,32 @@ test('invoice fasilitas dibatalkan dari menu Invoice: pengajuan REJECTED; diakti
   assert.equal((await s.api('POST', `/invoices/${invoiceId}/status`, { status: 'UNPAID' }, { as: 'finance' })).status, 200);
   assert.equal((await requestOf(id)).status, 'INVOICED');
 });
+
+test('hapus pengajuan fasilitas: tidak tampil lagi, bisa diurungkan; selama invoice aktif ditolak; tercatat di Log Aktivitas', async () => {
+  const sub = await submit('A-01');
+  const id = sub.body.requestId || sub.body.request?.id || (await s.api('GET', '/facilities/requests', undefined, { as: 'sales' })).body.requests[0].id;
+  const url = `/facilities/requests/${id}`;
+  assert.equal((await s.api('DELETE', url)).status, 401);
+  assert.equal((await s.api('DELETE', '/facilities/requests/tidak-ada', undefined, { as: 'sales' })).status, 404);
+
+  const del = await s.api('DELETE', url, undefined, { as: 'operations' });
+  assert.equal(del.status, 200, del.text);
+  assert.equal(await requestOf(id), undefined, 'hilang dari daftar');
+  assert.equal((await s.api('DELETE', url, undefined, { as: 'sales' })).status, 404, 'tidak bisa dua kali');
+
+  const undo = await s.api('POST', `${url}/restore`, undefined, { as: 'sales' });
+  assert.equal(undo.status, 200, undo.text);
+  assert.ok(await requestOf(id), 'kembali setelah diurungkan');
+  assert.equal((await s.api('POST', `${url}/restore`, undefined, { as: 'sales' })).status, 404, 'yang tidak dihapus tidak dipulihkan');
+
+  const { id: invoiced, invoiceId } = await issueFacilityInvoice('C-05');
+  assert.equal((await s.api('DELETE', `/facilities/requests/${invoiced}`, undefined, { as: 'sales' })).body.code, 'REQUEST_INVOICED');
+  assert.equal((await s.api('POST', `/facilities/requests/${invoiced}/cancel-invoice`, { reason: REASON, outcome: 'rejected' }, { as: 'sales' })).status, 200);
+  assert.equal((await s.api('DELETE', `/facilities/requests/${invoiced}`, undefined, { as: 'sales' })).status, 200, 'setelah invoice dibatalkan boleh dihapus');
+  const inv = await invoiceOf(invoiceId);
+  assert.equal((inv.invoice || inv).payment_status, 'CANCELED', 'invoice yang dibatalkan tetap tercatat');
+
+  const logs = JSON.stringify((await s.api('GET', '/audit-logs?limit=30', undefined, { as: 'superadmin' })).body);
+  assert.match(logs, /Hapus pengajuan fasilitas/);
+  assert.match(logs, /Pulihkan pengajuan fasilitas/);
+});

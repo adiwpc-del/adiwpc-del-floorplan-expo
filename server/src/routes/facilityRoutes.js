@@ -606,6 +606,49 @@ router.put('/requests/:id', (req, res) => {
   }
 });
 
+// DELETE /api/facilities/requests/:id: "Hapus" a request (AGENTS.md §46). Soft delete (deleted_at), undone by
+// POST /requests/:id/restore ("Urungkan"). Refused while it has a live invoice: cancel that invoice first.
+const auditRequest = (req, action, request) => {
+  req.skipAudit = true;
+  writeAuditLog({
+    user: req.user, category: 'Fasilitas', action,
+    target: `${request.company_name || '-'} (booth ${request.booth_code})`,
+    summary: `${request.status} · Rp ${(Number(request.total_amount) || 0).toLocaleString('id-ID')}`,
+    method: req.method, path: `/api/facilities${req.path}`, statusCode: 200, ip: clientIp(req),
+    details: { requestId: request.id }
+  });
+};
+
+router.delete('/requests/:id', (req, res) => {
+  try {
+    const request = db.prepare('SELECT * FROM facility_requests WHERE id = ? AND deleted_at IS NULL').get(req.params.id);
+    if (!request) return res.status(404).json({ success: false, message: 'Pengajuan fasilitas tidak ditemukan' });
+    const invoice = invoiceOfRequest(request);
+    if (invoice && !isCanceled(invoice)) {
+      return res.status(409).json({ success: false, code: 'REQUEST_INVOICED', message: `Pengajuan ini punya invoice aktif ${invoice.invoice_number}. Batalkan invoice-nya lebih dulu.` });
+    }
+    db.prepare('UPDATE facility_requests SET deleted_at = CURRENT_TIMESTAMP, deleted_by = ? WHERE id = ?').run(req.user?.name || '', request.id);
+    auditRequest(req, 'Hapus pengajuan fasilitas', request);
+    res.json({ success: true, message: `Pengajuan booth ${request.booth_code} (${request.company_name || '-'}) dihapus.` });
+  } catch (error) {
+    console.error('Error deleting facility request:', error);
+    res.status(500).json({ success: false, message: 'Gagal menghapus pengajuan fasilitas' });
+  }
+});
+
+router.post('/requests/:id/restore', (req, res) => {
+  try {
+    const request = db.prepare('SELECT * FROM facility_requests WHERE id = ? AND deleted_at IS NOT NULL').get(req.params.id);
+    if (!request) return res.status(404).json({ success: false, message: 'Pengajuan yang dihapus tidak ditemukan' });
+    db.prepare('UPDATE facility_requests SET deleted_at = NULL, deleted_by = NULL WHERE id = ?').run(request.id);
+    auditRequest(req, 'Pulihkan pengajuan fasilitas', request);
+    res.json({ success: true, message: `Pengajuan booth ${request.booth_code} dikembalikan.` });
+  } catch (error) {
+    console.error('Error restoring facility request:', error);
+    res.status(500).json({ success: false, message: 'Gagal memulihkan pengajuan fasilitas' });
+  }
+});
+
 /**
  * POST /api/facilities/requests/:id/cancel-invoice { reason, outcome, confirmNumber }: the tenant withdrew or the order
  * changed (AGENTS.md §46). The invoice stays on record as CANCELED; its number is never reused.

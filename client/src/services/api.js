@@ -1104,6 +1104,24 @@ export const api = {
     }
   },
 
+  async deleteFacilityRequest(id) {
+    try {
+      const res = await apiFetch(`${API_BASE_URL}/facilities/requests/${id}`, { method: 'DELETE' });
+      return await res.json();
+    } catch (e) {
+      return { success: false, error: e.message || 'Koneksi server gagal' };
+    }
+  },
+
+  async restoreFacilityRequest(id) {
+    try {
+      const res = await apiFetch(`${API_BASE_URL}/facilities/requests/${id}/restore`, { method: 'POST' });
+      return await res.json();
+    } catch (e) {
+      return { success: false, error: e.message || 'Koneksi server gagal' };
+    }
+  },
+
   async cancelFacilityInvoice(id, data) {
     try {
       const res = await apiFetch(`${API_BASE_URL}/facilities/requests/${id}/cancel-invoice`, {

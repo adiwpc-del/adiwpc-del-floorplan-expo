@@ -101,6 +101,46 @@ export default function FacilityRequestsPage() {
     setTimeout(() => setToastMessage(''), 3500);
   };
 
+  // Hapus pengajuan: confirm, remove from the list at once, "Urungkan" for 5 seconds
+  const [deleteRequest, setDeleteRequest] = useState(null);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [undoRequest, setUndoRequest] = useState(null);
+  const undoTimerRef = React.useRef(null);
+
+  useEffect(() => {
+    if (!deleteRequest) return undefined;
+    const onKey = (e) => { if (e.key === 'Escape' && !isDeleting) setDeleteRequest(null); };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [deleteRequest, isDeleting]);
+
+  useEffect(() => () => clearTimeout(undoTimerRef.current), []);
+
+  const handleDeleteRequest = async () => {
+    const req = deleteRequest;
+    setIsDeleting(true);
+    const res = await api.deleteFacilityRequest(req.id);
+    setIsDeleting(false);
+    if (!res?.success) {
+      showToast(`⚠️ ${res?.message || res?.error || 'Gagal menghapus pengajuan'}`);
+      return;
+    }
+    setDeleteRequest(null);
+    setRequests(prev => prev.filter(r => r.id !== req.id));
+    clearTimeout(undoTimerRef.current);
+    setUndoRequest(req);
+    undoTimerRef.current = setTimeout(() => setUndoRequest(null), 5000);
+  };
+
+  const handleUndoDelete = async () => {
+    const req = undoRequest;
+    clearTimeout(undoTimerRef.current);
+    setUndoRequest(null);
+    const res = await api.restoreFacilityRequest(req.id);
+    showToast(res?.success ? `✅ ${res.message}` : `⚠️ ${res?.message || res?.error || 'Gagal mengembalikan pengajuan'}`);
+    loadAllData();
+  };
+
   useEffect(() => {
     loadAllData();
   }, []);
@@ -749,6 +789,17 @@ export default function FacilityRequestsPage() {
                                 <XCircle size={13} />
                               </button>
                             )}
+
+                            <button
+                              type="button"
+                              onClick={() => setDeleteRequest(req)}
+                              disabled={Boolean(liveInvoice)}
+                              aria-label={`Hapus pengajuan booth ${req.booth_code}`}
+                              className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-slate-400"
+                              title={liveInvoice ? `Batalkan invoice ${liveInvoice.number} lebih dulu untuk menghapus pengajuan ini` : 'Hapus pengajuan'}
+                            >
+                              <Trash2 size={13} />
+                            </button>
                           </div>
                         </td>
                       </tr>
@@ -1194,6 +1245,60 @@ export default function FacilityRequestsPage() {
         }}
         showToast={showToast}
       />
+
+      {deleteRequest && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-xs animate-fadeIn" role="dialog" aria-modal="true" aria-label="Hapus Pengajuan">
+          <div className="w-full max-w-sm bg-white rounded-2xl shadow-2xl border border-slate-200 overflow-hidden text-left">
+            <div className="p-5 space-y-3 text-xs">
+              <div className="flex items-center gap-3">
+                <div className="w-9 h-9 rounded-xl bg-rose-100 border border-rose-200 text-rose-600 flex items-center justify-center shrink-0">
+                  <Trash2 size={17} />
+                </div>
+                <div>
+                  <h2 className="text-sm font-bold text-slate-900 leading-tight">Hapus pengajuan ini?</h2>
+                  <p className="text-[11px] text-slate-500">Bisa diurungkan sesaat setelah dihapus.</p>
+                </div>
+              </div>
+              <dl className="rounded-xl border border-slate-200 bg-slate-50 divide-y divide-slate-200">
+                {[
+                  ['Booth / Tenant', `#${deleteRequest.booth_code} · ${deleteRequest.company_name || '-'}`],
+                  ['Total', `Rp ${(Number(deleteRequest.total_amount) || 0).toLocaleString('id-ID')}`],
+                  ['Status', deleteRequest.status]
+                ].map(([label, value]) => (
+                  <div key={label} className="flex items-start justify-between gap-3 px-3 py-2">
+                    <dt className="text-slate-500 shrink-0">{label}</dt>
+                    <dd className="font-semibold text-slate-900 text-right break-words min-w-0">{value}</dd>
+                  </div>
+                ))}
+              </dl>
+              {deleteRequest.invoice && (
+                <p className="text-[11px] text-slate-500">Invoice {deleteRequest.invoice.number} yang sudah dibatalkan tetap tercatat.</p>
+              )}
+            </div>
+            <div className="px-5 py-3.5 bg-slate-50 border-t border-slate-200 flex items-center justify-end gap-2">
+              <button type="button" autoFocus onClick={() => setDeleteRequest(null)} disabled={isDeleting}
+                className="px-3.5 py-2 rounded-lg border border-slate-200 bg-white hover:bg-slate-100 text-slate-700 text-xs font-semibold cursor-pointer active:scale-[0.97] transition-transform">
+                Batal
+              </button>
+              <button type="button" onClick={handleDeleteRequest} disabled={isDeleting}
+                className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold cursor-pointer disabled:opacity-50 active:scale-[0.97] transition-transform">
+                <Trash2 size={13} />
+                <span>{isDeleting ? 'Menghapus…' : 'Hapus'}</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {undoRequest && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 bg-slate-900/95 text-white pl-4 pr-2 py-2 rounded-xl border border-slate-700 shadow-2xl flex items-center gap-3 text-xs animate-fadeIn" role="status">
+          <span>Pengajuan booth {undoRequest.booth_code} dihapus</span>
+          <button type="button" onClick={handleUndoDelete}
+            className="px-2.5 py-1 rounded-lg bg-white/10 hover:bg-white/20 font-bold text-amber-300 cursor-pointer">
+            Urungkan
+          </button>
+        </div>
+      )}
 
       <FacilityRequestEditModal
         request={editRequest}
