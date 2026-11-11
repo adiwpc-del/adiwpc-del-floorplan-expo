@@ -728,3 +728,10 @@ Fabric.js v7 does not automatically preserve custom object properties (`isBooth`
   - **More than one page**: the content sits in a table whose empty head / foot rows (12 mm top; bottom 12 mm, or 38 mm with a letterhead so its footer logo / address stay free) are repeated by the browser on every page. Item rows, the total and the signature block are never split. The sheet is marked `data-print-pages`; `printInvoiceElement` then undoes its one-page rules (fixed 297 mm, clipped). It used to cut a long form off after page 1.
   - **"Download PDF A4" (and "Kirim via WhatsApp") = the server**: `POST /api/facilities/form-pdf { tenant, form, items, mode, docNumber }` (staff of the Fasilitas menu, nothing stored) renders `/print/facility-form` (`FacilityFormPrintPage`, payload `window.__FACILITY_PRINT__`) with the saved invoice design through `renderFacilityFormPdf` (same engine and queue as the invoice, §34). Client: `downloadFacilityFormPdf()` in `utils/invoicePdf.js`. Without Chromium (503) the modal opens the print dialog instead. The old html2canvas download always failed on Tailwind v4's `oklch()` colours.
 - Tests: `server/test/fasilitas.test.js`.
+
+---
+
+## 47. Pasang Aplikasi (ikon Dock / layar HP) (`client/public/manifest.webmanifest`, `utils/installApp.js`, `InstallAppButton.jsx`)
+- The web app is installable (PWA without a service worker): `manifest.webmanifest` (`start_url` `/admin`, `display: standalone`, theme `#0f172a`), icons `icon-192.png` / `icon-512.png` (rounded tile with margin, for the macOS Dock / Windows taskbar), `icon-maskable-512.png` (Android), `apple-touch-icon.png` (iOS), `favicon.svg`; all the sidebar's EXPO map glyph. `index.html` links them.
+- "Pasang App" (admin sidebar, hidden when already running as the installed app): uses the browser's own prompt (`beforeinstallprompt`, captured from the start in `main.jsx` by `captureInstallPrompt()`), otherwise shows the manual steps for the platform (iPhone Safari, Android Chrome, Safari on Mac "Tambahkan ke Dock", desktop Chrome / Edge).
+- Installability check: Chrome's `Page.getInstallabilityErrors` must be empty.

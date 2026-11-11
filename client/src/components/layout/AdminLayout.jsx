@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { LayoutDashboard, Map, Users, Settings, ArrowLeft, FileText, PackagePlus, UserCog, ScrollText, LogOut, KeyRound, X, HardHat, Activity } from 'lucide-react';
 import NotificationBell from './NotificationBell';
+import InstallAppButton from './InstallAppButton';
 import ChatDock from '../chat/ChatDock';
 import { useAuth } from '../../context/AuthContext';
 import { api } from '../../services/api';
@@ -141,6 +142,7 @@ export default function AdminLayout() {
           {visibleUtility.map(item => <NavItem key={item.page} item={item} />)}
           <ChatDock />
           <NotificationBell />
+          <InstallAppButton />
           <NavLink
             to="/"
             className="w-full py-2 px-1 flex flex-col items-center justify-center rounded-xl text-slate-400 hover:bg-slate-800/80 hover:text-slate-200 transition-all group"
